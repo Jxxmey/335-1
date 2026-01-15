@@ -2,37 +2,33 @@ version: '3.8'
 
 services:
   # ------------------------------------
-  # ส่วน Backend (API)
+  # ส่วน Backend
   # ------------------------------------
   backend:
-    build: ./backend
+    build: ./backend         # 👈 ชี้เข้าไปในโฟลเดอร์ backend ที่วางอยู่ข้างๆ
     container_name: promo_backend
     ports:
       - "5000:5000"
-    # อ่านค่า Config จากไฟล์ .env ในโฟลเดอร์ backend
     env_file:
-      - ./backend/.env
+      - ./backend/.env       # 👈 อ่านไฟล์ .env ในโฟลเดอร์ backend
     environment:
       - PORT=5000
     restart: unless-stopped
 
   # ------------------------------------
-  # ส่วน Frontend (React Website)
+  # ส่วน Frontend
   # ------------------------------------
   frontend:
     build:
-      context: ../frontend
+      context: ./frontend    # 👈 ชี้เข้าไปในโฟลเดอร์ frontend ที่วางอยู่ข้างๆ
       dockerfile: Dockerfile
     container_name: promo_frontend
     ports:
       - "5173:5173"
     volumes:
-      # ทำ Volume Mapping เพื่อให้แก้โค้ดในเครื่องแล้วหน้าเว็บเปลี่ยนทันที (Hot Reload)
-      - ../frontend:/app
-      - /app/node_modules
+      - ./frontend:/app      # 👈 Map โฟลเดอร์ frontend เข้าไปใน Container
+      - /app/node_modules    # 👈 ป้องกัน node_modules ใน Container หาย
     environment:
-      # ระบุ URL ของ Backend ให้ Frontend รู้จัก
-      # หมายเหตุ: เนื่องจาก React รันบน Browser เครื่องเรา จึงต้องชี้ไปที่ localhost
       - VITE_API_URL=http://localhost:5000/api
     depends_on:
       - backend
