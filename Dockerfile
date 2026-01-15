@@ -1,17 +1,21 @@
 # ---------------------------------------
-# Stage 1: Build Frontend (สร้างหน้าเว็บ)
+# Stage 1: Build Frontend
 # ---------------------------------------
 FROM node:18-alpine as build-stage
 
 WORKDIR /app/frontend
-# ก๊อปปี้ไฟล์ package ของ frontend มาลง
+
+# ก๊อปปี้ package.json ไปลง
 COPY frontend/package*.json ./
 RUN npm install
 
-# ก๊อปปี้โค้ด frontend ทั้งหมดมา แล้วสั่ง Build
+# ก๊อปปี้โค้ดทั้งหมด
 COPY frontend/ .
-# กำหนด URL API เป็น /api เพราะอยู่ server เดียวกัน
+
+# 🔥 [สำคัญมาก] บังคับให้ใช้ /api ตรงนี้เลย (แก้ปัญหา localhost)
 ENV VITE_API_URL=/api
+
+# สั่ง Build เว็บ (มันจะเอาค่าข้างบนไปฝังในโค้ด)
 RUN npm run build
 
 # ---------------------------------------
@@ -21,17 +25,17 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# ก๊อปปี้ไฟล์ package ของ backend มาลง
+# ก๊อปปี้ package.json ของ Backend
 COPY backend/package*.json ./
 RUN npm install --production
 
-# ก๊อปปี้โค้ด backend ทั้งหมด
+# ก๊อปปี้โค้ด Backend
 COPY backend/ .
 
-# 🔥 ก๊อปปี้ไฟล์หน้าเว็บที่ Build เสร็จแล้วจาก Stage 1 มาไว้ใน Backend
+# ก๊อปปี้ไฟล์หน้าเว็บที่ Build เสร็จแล้วจาก Stage 1 มาใส่
 COPY --from=build-stage /app/frontend/dist ../frontend/dist
 
-# เปิด Port 5000
+# เปิด Port
 EXPOSE 5000
 
 # รัน Server
