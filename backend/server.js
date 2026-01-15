@@ -2,11 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const multer = require('multer'); // Import Multer
+const multer = require('multer');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const webpush = require('web-push');
 const FormData = require('form-data');
+const cloudinary = require('cloudinary').v2;
+const path = require('path'); // ✅ เพิ่มบรรทัดนี้ครับ สำคัญมาก!
 
 const Event = require('./models/Event');
 const Subscription = require('./models/Subscription');
@@ -22,6 +24,13 @@ mongoose.connect(process.env.DB_CONNECTION)
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.error(err));
 
+// Config Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
 // Config Push Notification
 webpush.setVapidDetails(
   process.env.VAPID_EMAIL,
@@ -29,12 +38,24 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-// Config Upload (ประกาศไว้ข้างบนสุด เพื่อให้เรียกใช้ได้ทุกที่)
+// Config Upload
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- 2. MIDDLEWARES ---
+// --- Helper: Upload to Cloudinary ---
+const uploadToCloudinary = (buffer) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: "promohub" },
+      (error, result) => {
+        if (result) resolve(result);
+        else reject(error);
+      }
+    );
+    stream.end(buffer);
+  });
+};
 
-// Middleware ตรวจสอบ Token (สำหรับ Admin เท่านั้น)
+// --- 2. MIDDLEWARES ---
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(403).send('Token required');
@@ -46,14 +67,12 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Middleware ตรวจสอบ Token แบบยืดหยุ่น (มีก็ได้ ไม่มีก็ได้)
-// ใช้เช็คว่าคนโพสต์เป็น Admin หรือ User ธรรมดา
 const verifyTokenOptional = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (token) {
     try {
       const decoded = jwt.verify(token, process.env.ADMIN_PASSWORD);
-      req.user = decoded; // ถ้ามี token และถูกต้อง ให้ถือว่าเป็น Admin
+      req.user = decoded;
     } catch (e) {}
   }
   next();
@@ -82,13 +101,10 @@ app.post('/api/notifications/subscribe', async (req, res) => {
   }
 });
 
-// GET Events: แยก User กับ Admin
+// GET Events
 app.get('/api/events', async (req, res) => {
   const { role } = req.query;
   let filter = {};
-  
-  // ถ้าไม่ใช่ admin ให้ดึงเฉพาะที่ 'approved'
-  // (หรือถ้าไม่มี status เลยก็ให้ถือว่า approved เพื่อรองรับข้อมูลเก่า)
   if (role !== 'admin') {
     filter = {
         $or: [
@@ -97,7 +113,6 @@ app.get('/api/events', async (req, res) => {
         ]
     };
   }
-  
   try {
     const events = await Event.find(filter).sort({ start: 1 });
     res.json(events);
@@ -106,25 +121,22 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
-// POST Event: สร้างโปรโมชั่น (รวมทั้ง Admin และ User ใน Route เดียว)
+// POST Event (Create)
 app.post('/api/events', verifyTokenOptional, upload.array('images', 10), async (req, res) => {
   try {
     const imageUrls = [];
+    const imagePublicIds = [];
     
-    // Upload รูปไป ImgBB
     if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(file => {
-        const formData = new FormData();
-        formData.append('image', file.buffer.toString('base64'));
-        return axios.post(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, formData, {
-            headers: formData.getHeaders()
-        }).then(r => r.data.data.url);
+      const uploadPromises = req.files.map(file => uploadToCloudinary(file.buffer));
+      const results = await Promise.all(uploadPromises);
+      
+      results.forEach(result => {
+          imageUrls.push(result.secure_url);
+          imagePublicIds.push(result.public_id);
       });
-      const urls = await Promise.all(uploadPromises);
-      imageUrls.push(...urls);
     }
 
-    // เช็คสถานะ: ถ้ามี req.user (Admin) -> approved, ถ้าไม่มี (User) -> pending
     const status = req.user ? 'approved' : 'pending';
 
     const newEvent = new Event({
@@ -135,13 +147,13 @@ app.post('/api/events', verifyTokenOptional, upload.array('images', 10), async (
       description: req.body.description,
       linkUrl: req.body.linkUrl,
       imageUrls,
+      imagePublicIds,
       status: status,
       createdBy: req.user ? 'admin' : 'user'
     });
 
     await newEvent.save();
 
-    // ส่งแจ้งเตือน Push Notification (เฉพาะถ้าสถานะเป็น Approved เท่านั้น)
     if (status === 'approved') {
         const payload = JSON.stringify({
           title: `🔥 ใหม่! ${req.body.title}`,
@@ -149,7 +161,6 @@ app.post('/api/events', verifyTokenOptional, upload.array('images', 10), async (
           icon: imageUrls[0] || '',
           url: '/'
         });
-    
         const subs = await Subscription.find();
         subs.forEach(sub => {
           webpush.sendNotification(sub, payload).catch(err => {
@@ -166,75 +177,75 @@ app.post('/api/events', verifyTokenOptional, upload.array('images', 10), async (
   }
 });
 
-// 📌 UPDATE Event (เพิ่มส่วนนี้ให้แล้วครับ: สำหรับแก้ไขข้อมูล)
+// PUT Event (Update)
 app.put('/api/events/:id', verifyToken, upload.array('images', 10), async (req, res) => {
   try {
     const { title, start, end, color, description, linkUrl } = req.body;
-    
-    // สร้าง Object ข้อมูลที่จะแก้ไข
-    let updateData = {
-      title, start, end, color, description, linkUrl
-    };
+    let updateData = { title, start, end, color, description, linkUrl };
 
-    // ถ้ามีการอัปโหลดรูปเพิ่ม
     if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(file => {
-        const formData = new FormData();
-        formData.append('image', file.buffer.toString('base64'));
-        return axios.post(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, formData, {
-            headers: formData.getHeaders()
-        }).then(r => r.data.data.url);
-      });
-      const newUrls = await Promise.all(uploadPromises);
+      const uploadPromises = req.files.map(file => uploadToCloudinary(file.buffer));
+      const results = await Promise.all(uploadPromises);
       
-      // ใช้ $push เพื่อเพิ่มรูปใหม่เข้าไปต่อท้ายรูปเดิม
-      updateData.$push = { imageUrls: { $each: newUrls } };
+      const newUrls = results.map(r => r.secure_url);
+      const newIds = results.map(r => r.public_id);
+      
+      updateData.$push = { 
+          imageUrls: { $each: newUrls },
+          imagePublicIds: { $each: newIds }
+      };
     }
 
-    // ทำการ Update ใน Database
-    const updatedEvent = await Event.findByIdAndUpdate(
-      req.params.id, 
-      updateData, 
-      { new: true } // option นี้เพื่อให้ mongoose คืนค่าข้อมูลใหม่กลับไป
-    );
-
+    const updatedEvent = await Event.findByIdAndUpdate(req.params.id, updateData, { new: true });
     res.json(updatedEvent);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Approve Event (สำหรับ Admin)
+// Approve Event
 app.put('/api/events/:id/approve', verifyToken, async (req, res) => {
   try {
     const event = await Event.findByIdAndUpdate(req.params.id, { status: 'approved' }, { new: true });
-    
-    // Optional: ส่งแจ้งเตือนเมื่ออนุมัติแล้วก็ได้ (เพิ่ม code webpush ตรงนี้ถ้าต้องการ)
-
     res.json(event);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Delete Event
+// DELETE Event
 app.delete('/api/events/:id', verifyToken, async (req, res) => {
   try {
+      const event = await Event.findById(req.params.id);
+      if (!event) return res.status(404).json({ error: 'Event not found' });
+
+      if (event.imagePublicIds && event.imagePublicIds.length > 0) {
+          const deletePromises = event.imagePublicIds.map(id => cloudinary.uploader.destroy(id));
+          await Promise.all(deletePromises);
+          console.log('🗑️ Deleted images from Cloudinary');
+      }
+
       await Event.findByIdAndDelete(req.params.id);
-      res.json({ message: 'Deleted' });
+      res.json({ message: 'Deleted event and images' });
+
   } catch (err) {
+      console.error(err);
       res.status(500).json({ error: err.message });
   }
 });
 
-// บอกให้รู้ว่าไฟล์ Frontend อยู่ที่ไหน (โฟลเดอร์ dist ที่ได้จากการ Build)
+// ----------------------------------------
+// ✅ ให้ Backend เสิร์ฟไฟล์ Frontend (ส่วนสำคัญ)
+// ----------------------------------------
+// ต้องวางไว้ล่างสุด ก่อน app.listen
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
-// ถ้าเข้าลิงก์ไหนที่ไม่ใช่ /api ให้ส่งหน้า index.html ของ React ไปแสดง
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
+  // อย่าลืมเช็คว่า path ไม่ชนกับ /api
+  if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
+  }
 });
-
 // ----------------------------------------
 
 const PORT = process.env.PORT || 5000;
