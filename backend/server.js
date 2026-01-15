@@ -227,5 +227,15 @@ app.delete('/api/events/:id', verifyToken, async (req, res) => {
   }
 });
 
+// บอกให้รู้ว่าไฟล์ Frontend อยู่ที่ไหน (โฟลเดอร์ dist ที่ได้จากการ Build)
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+
+// ถ้าเข้าลิงก์ไหนที่ไม่ใช่ /api ให้ส่งหน้า index.html ของ React ไปแสดง
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
+});
+
+// ----------------------------------------
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
