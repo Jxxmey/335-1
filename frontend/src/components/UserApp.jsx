@@ -174,7 +174,11 @@ export default function UserApp() {
         <div className="d-flex align-items-center gap-3">
             {/* ✅ ส่วนโลโก้ที่เพิ่มเข้ามา */}
             <div className="bg-white rounded-circle p-1 d-flex align-items-center justify-content-center shadow-sm" style={{width:'55px', height:'55px'}}>
-                <img src="./logo.png" alt="Logo" style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain'}} />
+                <img 
+                  src="/logo.png" 
+                  alt="Logo" 
+                  style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain'}} 
+                />
             </div>
             
             {/* ชื่อแอปและข้อความ */}
