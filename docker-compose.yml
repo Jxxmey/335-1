@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # ------------------------------------
+  # ส่วน Backend (API)
+  # ------------------------------------
+  backend:
+    build: ./backend
+    container_name: promo_backend
+    ports:
+      - "5000:5000"
+    # อ่านค่า Config จากไฟล์ .env ในโฟลเดอร์ backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - PORT=5000
+    restart: unless-stopped
+
+  # ------------------------------------
+  # ส่วน Frontend (React Website)
+  # ------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: promo_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      # ทำ Volume Mapping เพื่อให้แก้โค้ดในเครื่องแล้วหน้าเว็บเปลี่ยนทันที (Hot Reload)
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      # ระบุ URL ของ Backend ให้ Frontend รู้จัก
+      # หมายเหตุ: เนื่องจาก React รันบน Browser เครื่องเรา จึงต้องชี้ไปที่ localhost
+      - VITE_API_URL=http://localhost:5000/api
+    depends_on:
+      - backend
