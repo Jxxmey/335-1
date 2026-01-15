@@ -3,12 +3,11 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const multer = require('multer');
-const axios = require('axios');
+const axios = require('axios'); // ใช้สำหรับยิงไป ImgBB
 const jwt = require('jsonwebtoken');
 const webpush = require('web-push');
-const FormData = require('form-data');
-const cloudinary = require('cloudinary').v2;
-const path = require('path'); // ✅ เพิ่มบรรทัดนี้ครับ สำคัญมาก!
+const FormData = require('form-data'); // ใช้จัด format รูป
+const path = require('path'); // ✅ Import path
 
 const Event = require('./models/Event');
 const Subscription = require('./models/Subscription');
@@ -24,13 +23,6 @@ mongoose.connect(process.env.DB_CONNECTION)
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.error(err));
 
-// Config Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
 // Config Push Notification
 webpush.setVapidDetails(
   process.env.VAPID_EMAIL,
@@ -41,18 +33,15 @@ webpush.setVapidDetails(
 // Config Upload
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- Helper: Upload to Cloudinary ---
-const uploadToCloudinary = (buffer) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder: "promohub" },
-      (error, result) => {
-        if (result) resolve(result);
-        else reject(error);
-      }
-    );
-    stream.end(buffer);
-  });
+// --- Helper: Upload to ImgBB ---
+const uploadToImgBB = async (buffer) => {
+    const formData = new FormData();
+    formData.append('image', buffer.toString('base64'));
+    
+    const response = await axios.post(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, formData, {
+        headers: formData.getHeaders()
+    });
+    return response.data.data.url;
 };
 
 // --- 2. MIDDLEWARES ---
@@ -121,20 +110,16 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
-// POST Event (Create)
+// POST Event (Create - ImgBB)
 app.post('/api/events', verifyTokenOptional, upload.array('images', 10), async (req, res) => {
   try {
     const imageUrls = [];
-    const imagePublicIds = [];
     
+    // Upload รูปไป ImgBB
     if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(file => uploadToCloudinary(file.buffer));
-      const results = await Promise.all(uploadPromises);
-      
-      results.forEach(result => {
-          imageUrls.push(result.secure_url);
-          imagePublicIds.push(result.public_id);
-      });
+      const uploadPromises = req.files.map(file => uploadToImgBB(file.buffer));
+      const urls = await Promise.all(uploadPromises);
+      imageUrls.push(...urls);
     }
 
     const status = req.user ? 'approved' : 'pending';
@@ -147,7 +132,7 @@ app.post('/api/events', verifyTokenOptional, upload.array('images', 10), async (
       description: req.body.description,
       linkUrl: req.body.linkUrl,
       imageUrls,
-      imagePublicIds,
+      // imagePublicIds: ตัดออกเพราะ ImgBB ไม่ได้ใช้ ID ลบง่ายๆ
       status: status,
       createdBy: req.user ? 'admin' : 'user'
     });
@@ -177,23 +162,18 @@ app.post('/api/events', verifyTokenOptional, upload.array('images', 10), async (
   }
 });
 
-// PUT Event (Update)
+// PUT Event (Update - ImgBB)
 app.put('/api/events/:id', verifyToken, upload.array('images', 10), async (req, res) => {
   try {
     const { title, start, end, color, description, linkUrl } = req.body;
     let updateData = { title, start, end, color, description, linkUrl };
 
+    // ถ้ามีการอัปโหลดรูปเพิ่ม
     if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(file => uploadToCloudinary(file.buffer));
-      const results = await Promise.all(uploadPromises);
+      const uploadPromises = req.files.map(file => uploadToImgBB(file.buffer));
+      const newUrls = await Promise.all(uploadPromises);
       
-      const newUrls = results.map(r => r.secure_url);
-      const newIds = results.map(r => r.public_id);
-      
-      updateData.$push = { 
-          imageUrls: { $each: newUrls },
-          imagePublicIds: { $each: newIds }
-      };
+      updateData.$push = { imageUrls: { $each: newUrls } };
     }
 
     const updatedEvent = await Event.findByIdAndUpdate(req.params.id, updateData, { new: true });
@@ -213,35 +193,22 @@ app.put('/api/events/:id/approve', verifyToken, async (req, res) => {
   }
 });
 
-// DELETE Event
+// DELETE Event (ลบแค่ Database เพราะ ImgBB ลบยาก)
 app.delete('/api/events/:id', verifyToken, async (req, res) => {
   try {
-      const event = await Event.findById(req.params.id);
-      if (!event) return res.status(404).json({ error: 'Event not found' });
-
-      if (event.imagePublicIds && event.imagePublicIds.length > 0) {
-          const deletePromises = event.imagePublicIds.map(id => cloudinary.uploader.destroy(id));
-          await Promise.all(deletePromises);
-          console.log('🗑️ Deleted images from Cloudinary');
-      }
-
       await Event.findByIdAndDelete(req.params.id);
-      res.json({ message: 'Deleted event and images' });
-
+      res.json({ message: 'Deleted event (Images remain on ImgBB)' });
   } catch (err) {
-      console.error(err);
       res.status(500).json({ error: err.message });
   }
 });
 
 // ----------------------------------------
-// ✅ ให้ Backend เสิร์ฟไฟล์ Frontend (ส่วนสำคัญ)
+// ✅ ให้ Backend เสิร์ฟไฟล์ Frontend
 // ----------------------------------------
-// ต้องวางไว้ล่างสุด ก่อน app.listen
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 app.get('*', (req, res) => {
-  // อย่าลืมเช็คว่า path ไม่ชนกับ /api
   if (!req.path.startsWith('/api')) {
       res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
   }
