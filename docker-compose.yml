@@ -21,14 +21,14 @@ services:
   # ------------------------------------
   frontend:
     build:
-      context: ./frontend
+      context: ../frontend
       dockerfile: Dockerfile
     container_name: promo_frontend
     ports:
       - "5173:5173"
     volumes:
       # ทำ Volume Mapping เพื่อให้แก้โค้ดในเครื่องแล้วหน้าเว็บเปลี่ยนทันที (Hot Reload)
-      - ./frontend:/app
+      - ../frontend:/app
       - /app/node_modules
     environment:
       # ระบุ URL ของ Backend ให้ Frontend รู้จัก
