@@ -4,7 +4,7 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import { Modal, Button, Form, Carousel } from 'react-bootstrap';
-import { FaHome, FaCalendarAlt, FaPlusCircle, FaUserShield, FaLock, FaTimes } from 'react-icons/fa';
+import { FaHome, FaCalendarAlt, FaPlusCircle, FaUserShield, FaTimes } from 'react-icons/fa'; // ❌ เอา FaLock ออก
 import { useNavigate } from 'react-router-dom';
 import SubscribeButton from './SubscribeButton';
 
@@ -15,13 +15,15 @@ export default function UserApp() {
   
   // Modal States
   const [showDetailModal, setShowDetailModal] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   
-  // Form States
+  // ❌ ลบ State ของ Modal Login เก่าทิ้ง
+  // const [showLoginModal, setShowLoginModal] = useState(false);
+  // const [adminPassword, setAdminPassword] = useState('');
+
+  // Form States (สำหรับ User แจ้งโปรฯ)
   const [reqForm, setReqForm] = useState({ title: '', start: '', end: '', description: '', linkUrl: '' });
   const [reqFiles, setReqFiles] = useState([]);
-  const [adminPassword, setAdminPassword] = useState('');
 
   const navigate = useNavigate();
   const API_URL = '/api/events';
@@ -41,30 +43,21 @@ export default function UserApp() {
 
   const openDetail = (ev) => { setSelectedEvent(ev); setShowDetailModal(true); };
 
+  // ✅ แก้ไขปุ่ม Admin: ให้ไปหน้า /login เลย ไม่ต้องเปิด Modal
   const handleAdminClick = () => {
     const token = localStorage.getItem('token');
     if (token) {
       navigate('/admin');
     } else {
-      setShowLoginModal(true);
+      navigate('/login'); // เด้งไปหน้า AdminLogin ที่มีช่อง Username/Password ครบ
     }
   };
 
-  const handleLoginSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await axios.post('/api/auth/login', { password: adminPassword });
-      localStorage.setItem('token', res.data.token);
-      setShowLoginModal(false);
-      setAdminPassword('');
-      navigate('/admin');
-    } catch {
-      alert('❌ รหัสผ่านไม่ถูกต้อง');
-    }
-  };
+  // ❌ ลบฟังก์ชัน handleLoginSubmit เก่าทิ้ง เพราะไม่ได้ใช้แล้ว
 
-  // --- Logic Render Home ---
+  // --- Logic Render Home (คงเดิม) ---
   const renderHome = () => {
+    // ... (โค้ดเดิมทั้งหมด)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -172,16 +165,9 @@ export default function UserApp() {
       {/* Header พร้อม Logo */}
       <div className="app-header">
         <div className="d-flex align-items-center gap-3">
-            {/* ✅ ส่วนโลโก้ที่เพิ่มเข้ามา */}
             <div className="bg-white rounded-circle p-1 d-flex align-items-center justify-content-center shadow-sm" style={{width:'55px', height:'55px'}}>
-                <img 
-                  src="/logo.png" 
-                  alt="Logo" 
-                  style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain'}} 
-                />
+                <img src="/logo.png" alt="Logo" style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain'}} />
             </div>
-            
-            {/* ชื่อแอปและข้อความ */}
             <div>
                 <div className="d-flex align-items-center gap-2">
                     <h2 className="m-0 fw-bold" style={{letterSpacing:'-1px'}}>PromoHub</h2>
@@ -197,11 +183,9 @@ export default function UserApp() {
       {activeTab === 'calendar' && renderCalendar()}
       {activeTab === 'request' && renderRequest()}
 
-      {/* Footer Powered by Jomey */}
+      {/* Footer */}
       <div className="text-center mt-5 mb-5 pb-5 pt-3 opacity-50">
-          <small style={{fontSize: '0.75rem', letterSpacing: '1px', textTransform: 'uppercase'}}>
-              Powered by <span className="fw-bold text-primary">Jomey</span>
-          </small>
+          <small style={{fontSize: '0.75rem', letterSpacing: '1px', textTransform: 'uppercase'}}>Powered by <span className="fw-bold text-primary">Jomey</span></small>
       </div>
 
       {/* Bottom Nav */}
@@ -217,16 +201,11 @@ export default function UserApp() {
          <Modal.Header closeButton className="border-0 pb-0"></Modal.Header>
          <Modal.Body className="pt-0">
            <h3 className="fw-bold mb-3 mt-2">{selectedEvent?.title}</h3>
-           
            {selectedEvent?.imageUrls && selectedEvent.imageUrls.length > 0 ? (
              <Carousel className="mb-4 rounded-4 overflow-hidden shadow-sm" interval={null} indicators={selectedEvent.imageUrls.length > 1}>
                 {selectedEvent.imageUrls.map((url, i) => (
                     <Carousel.Item key={i}>
-                        <div 
-                            className="d-flex justify-content-center bg-light position-relative" 
-                            style={{height:'350px', cursor:'zoom-in'}}
-                            onClick={() => setPreviewImage(url)}
-                        >
+                        <div className="d-flex justify-content-center bg-light position-relative" style={{height:'350px', cursor:'zoom-in'}} onClick={() => setPreviewImage(url)}>
                             <img src={url} style={{width:'100%', height:'100%', objectFit:'cover'}} />
                             <div className="position-absolute bottom-0 end-0 m-2 badge bg-dark bg-opacity-50">🔍 แตะเพื่อขยาย</div>
                         </div>
@@ -234,48 +213,18 @@ export default function UserApp() {
                 ))}
              </Carousel>
            ) : null}
-
            <div className="d-flex gap-2 mb-3">
-                <span className="badge bg-light text-dark border px-3 py-2 rounded-pill">
-                    📅 เริ่ม: {selectedEvent && new Date(selectedEvent.start).toLocaleDateString()}
-                </span>
-                <span className="badge bg-light text-dark border px-3 py-2 rounded-pill">
-                    🏁 จบ: {selectedEvent && new Date(selectedEvent.end).toLocaleDateString()}
-                </span>
+                <span className="badge bg-light text-dark border px-3 py-2 rounded-pill">📅 เริ่ม: {selectedEvent && new Date(selectedEvent.start).toLocaleDateString()}</span>
+                <span className="badge bg-light text-dark border px-3 py-2 rounded-pill">🏁 จบ: {selectedEvent && new Date(selectedEvent.end).toLocaleDateString()}</span>
            </div>
-
            <p className="text-secondary" style={{whiteSpace: 'pre-wrap', lineHeight:'1.6'}}>{selectedEvent?.description}</p>
-           
            {selectedEvent?.linkUrl && (
-               <a href={selectedEvent.linkUrl} target="_blank" className="btn btn-primary w-100 rounded-pill py-3 fw-bold mt-2 shadow-sm" style={{background:'linear-gradient(90deg, #6366f1, #a855f7)', border:'none'}}>
-                   🌐 ไปยังหน้าเว็บกิจกรรม
-               </a>
+               <a href={selectedEvent.linkUrl} target="_blank" className="btn btn-primary w-100 rounded-pill py-3 fw-bold mt-2 shadow-sm" style={{background:'linear-gradient(90deg, #6366f1, #a855f7)', border:'none'}}>🌐 ไปยังหน้าเว็บกิจกรรม</a>
            )}
          </Modal.Body>
       </Modal>
 
-      {/* --- Login Modal --- */}
-      <Modal show={showLoginModal} onHide={()=>setShowLoginModal(false)} centered contentClassName="border-0 rounded-4 shadow">
-        <Modal.Header closeButton className="border-0"></Modal.Header>
-        <Modal.Body className="px-4 pb-5 text-center">
-            <div className="bg-primary bg-opacity-10 rounded-circle d-inline-flex p-4 mb-3">
-                <FaLock className="text-primary display-4" />
-            </div>
-            <h4 className="fw-bold mb-1">Admin Access</h4>
-            <p className="text-muted small mb-4">เข้าสู่ระบบจัดการหลังบ้าน</p>
-            <Form onSubmit={handleLoginSubmit}>
-                <Form.Control 
-                    type="password" 
-                    placeholder="Enter Password" 
-                    value={adminPassword} 
-                    onChange={e => setAdminPassword(e.target.value)}
-                    className="text-center py-3 bg-light border-0 rounded-3 mb-3"
-                    autoFocus
-                />
-                <Button variant="primary" type="submit" className="w-100 rounded-pill py-3 fw-bold">Login</Button>
-            </Form>
-        </Modal.Body>
-      </Modal>
+      {/* ❌ ลบ Login Modal เก่าทิ้งแล้ว เพราะใช้หน้า /login แทน */}
 
       {/* --- Image Preview Modal --- */}
       <Modal show={!!previewImage} onHide={() => setPreviewImage(null)} centered fullscreen contentClassName="bg-dark bg-opacity-90 border-0">
@@ -286,7 +235,6 @@ export default function UserApp() {
             {previewImage && <img src={previewImage} className="img-fluid" style={{maxHeight:'100vh', maxWidth:'100vw', objectFit:'contain'}} />}
         </Modal.Body>
       </Modal>
-
     </div>
   );
 }

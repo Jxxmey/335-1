@@ -8,13 +8,13 @@ const jwt = require('jsonwebtoken');
 const webpush = require('web-push');
 const FormData = require('form-data');
 const path = require('path');
-const bcrypt = require('bcryptjs'); // ⚠️ อย่าลืม npm install bcryptjs
+const bcrypt = require('bcryptjs'); 
 
 // Import Models
 const Event = require('./models/Event');
 const Subscription = require('./models/Subscription');
-const Admin = require('./models/Admin');       // ✅ เพิ่ม
-const InviteCode = require('./models/InviteCode'); // ✅ เพิ่ม
+const Admin = require('./models/Admin'); 
+const InviteCode = require('./models/InviteCode');
 
 const app = express();
 app.use(cors());
@@ -116,6 +116,29 @@ app.post('/api/auth/generate-invite', verifyToken, async (req, res) => {
   });
 
   res.json({ code, expiresAt });
+});
+
+// ✅ [เพิ่มใหม่] SECRET ROUTE: สำหรับสร้างแอดมินคนแรก (ใช้เสร็จแล้วลบออกด้วย!)
+app.get('/api/setup-first-admin', async (req, res) => {
+  try {
+    const code = 'welcome-admin-' + Math.random().toString(36).substring(7); // สุ่มโค้ดกันซ้ำ
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 ชม.
+
+    // สร้างโค้ดใหม่
+    await InviteCode.create({ code, expiresAt });
+
+    res.send(`
+      <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+        <h1 style="color: green;">✅ Setup Success!</h1>
+        <p>Invite Code Created: <b>${code}</b></p>
+        <a href="/register/${code}" style="background: blue; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+          คลิกที่นี่เพื่อสมัคร Admin เดี๋ยวนี้
+        </a>
+      </div>
+    `);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
 });
 
 // --- 4. EVENT & SUB ROUTES (เหมือนเดิมแต่ปรับ VerifyToken) ---
