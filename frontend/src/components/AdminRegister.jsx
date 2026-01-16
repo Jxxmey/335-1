@@ -10,7 +10,7 @@ export default function AdminRegister() {
 
   useEffect(() => {
     // เช็คว่าโค้ดใช้ได้ไหม
-    axios.get(`http://localhost:5000/api/auth/check-invite/${code}`)
+    axios.get(`/api/auth/check-invite/${code}`)
       .then(res => setValid(res.data.valid))
       .catch(() => setValid(false));
   }, [code]);
@@ -20,7 +20,7 @@ export default function AdminRegister() {
     if (formData.password !== formData.confirmPassword) return alert('รหัสผ่านไม่ตรงกัน');
     
     try {
-      await axios.post('http://localhost:5000/api/auth/register', {
+      await axios.post('/api/auth/register', {
         username: formData.username,
         password: formData.password,
         inviteCode: code

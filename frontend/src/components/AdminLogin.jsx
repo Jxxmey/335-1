@@ -9,7 +9,7 @@ export default function AdminLogin() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/auth/login', form);
+      const res = await axios.post('/api/auth/login', form);
       localStorage.setItem('token', res.data.token); // เก็บ Token
       navigate('/admin');
     } catch (err) { alert(err.response?.data?.error || 'เข้าสู่ระบบไม่สำเร็จ'); }

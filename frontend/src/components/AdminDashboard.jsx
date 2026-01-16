@@ -25,8 +25,8 @@ export default function AdminDashboard() {
   const [previewImage, setPreviewImage] = useState(null);
 
   const token = localStorage.getItem('token');
-  const API_URL = 'http://localhost:5000/api/events';
-  const AUTH_URL = 'http://localhost:5000/api/auth'; // Base URL สำหรับ Auth
+  const API_URL = '/api/events';
+  const AUTH_URL = '/api/auth'; // Base URL สำหรับ Auth
 
   useEffect(() => {
     if (!token) navigate('/login');

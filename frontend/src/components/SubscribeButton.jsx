@@ -19,7 +19,7 @@ export default function SubscribeButton() {
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
     });
-    await axios.post('http://localhost:5000/api/notifications/subscribe', subscription);
+    await axios.post('/api/notifications/subscribe', subscription);
     alert('🔔 ติดตามข่าวสารเรียบร้อย!');
   };
 

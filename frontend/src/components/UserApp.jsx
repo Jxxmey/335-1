@@ -24,7 +24,7 @@ export default function UserApp() {
   const [adminPassword, setAdminPassword] = useState('');
 
   const navigate = useNavigate();
-  const API_URL = 'http://localhost:5000/api/events';
+  const API_URL = '/api/events';
 
   useEffect(() => {
     fetchEvents();
@@ -53,7 +53,7 @@ export default function UserApp() {
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/auth/login', { password: adminPassword });
+      const res = await axios.post('/api/auth/login', { password: adminPassword });
       localStorage.setItem('token', res.data.token);
       setShowLoginModal(false);
       setAdminPassword('');
