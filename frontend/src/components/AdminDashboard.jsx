@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Modal, Button, Form, Carousel } from 'react-bootstrap';
-import { FaListAlt, FaClock, FaPlusCircle, FaSignOutAlt, FaEdit, FaTrash, FaCheck, FaTimes, FaCamera } from 'react-icons/fa';
-import '../App.css'; // ใช้ CSS เดียวกับ UserApp
+import { Modal, Button, Form } from 'react-bootstrap';
+import { FaListAlt, FaClock, FaPlusCircle, FaSignOutAlt, FaEdit, FaTrash, FaCheck, FaTimes, FaCamera, FaUserPlus, FaCopy } from 'react-icons/fa';
+import '../App.css'; 
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -13,21 +13,25 @@ export default function AdminDashboard() {
   const [events, setEvents] = useState([]);
   const [pendingEvents, setPendingEvents] = useState([]);
   
+  // Invite System State
+  const [inviteLink, setInviteLink] = useState('');
+  
   // Form & Edit States
   const [formData, setFormData] = useState({ 
     title: '', start: '', end: '', color: '#3788d8', description: '', linkUrl: '' 
   });
   const [files, setFiles] = useState([]);
   const [editingId, setEditingId] = useState(null);
-  const [previewImage, setPreviewImage] = useState(null); // Modal ดูรูป
+  const [previewImage, setPreviewImage] = useState(null);
 
   const token = localStorage.getItem('token');
   const API_URL = 'http://localhost:5000/api/events';
+  const AUTH_URL = 'http://localhost:5000/api/auth'; // Base URL สำหรับ Auth
 
   useEffect(() => {
     if (!token) navigate('/login');
     fetchEvents();
-  }, []);
+  }, [token, navigate]);
 
   const fetchEvents = async () => {
     try {
@@ -40,18 +44,42 @@ export default function AdminDashboard() {
     } catch (err) { console.error(err); }
   };
 
-  // --- Logic การจัดการข้อมูล ---
+  // --- Logic: Invite System ---
+  const generateInvite = async () => {
+    try {
+      const res = await axios.post(`${AUTH_URL}/generate-invite`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      // สร้าง Link: domain/register/code
+      const link = `${window.location.origin}/register/${res.data.code}`;
+      setInviteLink(link);
+    } catch (err) { 
+      alert('Error generating invite: ' + (err.response?.data?.error || err.message)); 
+    }
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(inviteLink);
+    alert('คัดลอกลิงก์แล้ว!');
+    setInviteLink(''); // ซ่อนลิงก์หลังจาก Copy
+  };
+
+  // --- Logic: Event Management ---
 
   const handleDelete = async (id) => {
     if(!confirm('ยืนยันลบรายการนี้?')) return;
-    await axios.delete(`${API_URL}/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-    fetchEvents();
+    try {
+      await axios.delete(`${API_URL}/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      fetchEvents();
+    } catch (err) { alert('ลบไม่สำเร็จ'); }
   };
 
   const handleApprove = async (id) => {
-    await axios.put(`${API_URL}/${id}/approve`, {}, { headers: { Authorization: `Bearer ${token}` } });
-    alert('✅ อนุมัติแล้ว'); 
-    fetchEvents();
+    try {
+      await axios.put(`${API_URL}/${id}/approve`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      alert('✅ อนุมัติแล้ว'); 
+      fetchEvents();
+    } catch (err) { alert('อนุมัติไม่สำเร็จ'); }
   };
 
   const handleEdit = (ev) => {
@@ -64,12 +92,11 @@ export default function AdminDashboard() {
       description: ev.description || '',
       linkUrl: ev.linkUrl || ''
     });
-    setActiveTab('form'); // สลับไปหน้าฟอร์ม
+    setActiveTab('form'); 
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    // Fix Time Logic: 00:01 - 12:00
     const fixedStart = formData.start + 'T00:01:00';
     const fixedEnd = formData.end + 'T12:00:00';
 
@@ -83,11 +110,13 @@ export default function AdminDashboard() {
     for (let f of files) data.append('images', f);
 
     try {
+      const config = { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' } };
+      
       if (editingId) {
-        await axios.put(`${API_URL}/${editingId}`, data, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' } });
+        await axios.put(`${API_URL}/${editingId}`, data, config);
         alert('✅ แก้ไขเรียบร้อย');
       } else {
-        await axios.post(API_URL, data, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' } });
+        await axios.post(API_URL, data, config);
         alert('✅ เพิ่มรายการเรียบร้อย');
       }
       
@@ -96,26 +125,24 @@ export default function AdminDashboard() {
       setFiles([]);
       setEditingId(null);
       fetchEvents();
-      setActiveTab('manage'); // กลับไปหน้าหน้ารายการ
+      setActiveTab('manage'); 
     } catch (err) { alert('Error: ' + err.message); }
   };
 
   // --- Render Views ---
 
-  // 1. หน้าจัดการ (รายการปัจจุบัน)
   const renderManage = () => (
     <div className="px-3 pb-5">
       <h5 className="text-secondary mb-3">✅ รายการปัจจุบัน ({events.length})</h5>
       {events.length === 0 && <p className="text-center text-muted mt-5">ไม่มีรายการ</p>}
       {events.map(ev => (
         <div key={ev._id} className="card border-0 shadow-sm mb-3 overflow-hidden rounded-4">
-            {/* ส่วนรูปภาพ */}
             <div className="bg-light position-relative" style={{height: '150px'}}>
                 {ev.imageUrls?.[0] ? (
                     <img 
                         src={ev.imageUrls[0]} 
                         className="w-100 h-100 object-fit-cover" 
-                        onClick={() => setPreviewImage(ev.imageUrls[0])} // คลิกเพื่อดูรูปใหญ่
+                        onClick={() => setPreviewImage(ev.imageUrls[0])} 
                     />
                 ) : (
                     <div className="d-flex align-items-center justify-content-center h-100 text-muted">No Image</div>
@@ -123,7 +150,6 @@ export default function AdminDashboard() {
                 <span className="position-absolute top-0 end-0 badge bg-primary m-2">{new Date(ev.start).toLocaleDateString()}</span>
             </div>
             
-            {/* ส่วนเนื้อหา */}
             <div className="p-3">
                 <h5 className="fw-bold mb-1">{ev.title}</h5>
                 <p className="text-muted small text-truncate">{ev.description}</p>
@@ -141,7 +167,6 @@ export default function AdminDashboard() {
     </div>
   );
 
-  // 2. หน้ารออนุมัติ
   const renderPending = () => (
     <div className="px-3 pb-5">
       <h5 className="text-warning-emphasis mb-3">⏳ รอการอนุมัติ ({pendingEvents.length})</h5>
@@ -171,7 +196,6 @@ export default function AdminDashboard() {
     </div>
   );
 
-  // 3. หน้าฟอร์ม (Add/Edit)
   const renderForm = () => (
     <div className="px-3 pb-5">
       <div className="card border-0 shadow-sm p-4 rounded-4">
@@ -186,11 +210,11 @@ export default function AdminDashboard() {
            
            <div className="row mb-3">
              <div className="col-6">
-                 <Form.Label>วันเริ่ม <small className="text-muted">(00:01)</small></Form.Label>
+                 <Form.Label>วันเริ่ม</Form.Label>
                  <Form.Control type="date" value={formData.start} onChange={e => setFormData({...formData, start: e.target.value})} required />
              </div>
              <div className="col-6">
-                 <Form.Label>วันจบ <small className="text-muted">(12:00)</small></Form.Label>
+                 <Form.Label>วันจบ</Form.Label>
                  <Form.Control type="date" value={formData.end} onChange={e => setFormData({...formData, end: e.target.value})} required />
              </div>
            </div>
@@ -232,15 +256,34 @@ export default function AdminDashboard() {
 
   return (
     <div className="app-container">
-      {/* Header Admin */}
-      <div className="app-header d-flex justify-content-between align-items-center bg-dark">
-        <div>
-            <h3 className="m-0 fw-bold">Admin Console</h3>
-            <p className="m-0 opacity-75 small">จัดการระบบหลังบ้าน</p>
+      {/* --- Header Admin (Updated) --- */}
+      <div className="app-header d-flex flex-column bg-dark text-white p-3 mb-3" style={{borderBottomLeftRadius:'20px', borderBottomRightRadius:'20px'}}>
+        <div className="d-flex justify-content-between align-items-center w-100">
+            <div>
+                <h4 className="m-0 fw-bold">Admin Console</h4>
+                <p className="m-0 opacity-75 small">จัดการระบบหลังบ้าน</p>
+            </div>
+            <div className="d-flex gap-2">
+                <button className="btn btn-sm btn-warning rounded-pill px-3 fw-bold" onClick={generateInvite}>
+                    <FaUserPlus className="me-1"/> Invite
+                </button>
+                <button className="btn btn-sm btn-outline-light rounded-pill px-3" onClick={() => { localStorage.removeItem('token'); navigate('/'); }}>
+                    <FaSignOutAlt/>
+                </button>
+            </div>
         </div>
-        <button className="btn btn-sm btn-outline-light rounded-pill px-3" onClick={() => { localStorage.removeItem('token'); navigate('/'); }}>
-            <FaSignOutAlt/> ออก
-        </button>
+        
+        {/* ส่วนแสดง Link Invite (จะโผล่เมื่อกดปุ่ม) */}
+        {inviteLink && (
+            <div className="mt-3 bg-white text-dark p-2 rounded d-flex justify-content-between align-items-center shadow animate__animated animate__fadeInDown">
+                <div className="text-truncate small fw-bold text-primary" style={{maxWidth:'220px'}}>
+                    {inviteLink}
+                </div>
+                <button className="btn btn-sm btn-dark rounded-pill px-3" onClick={copyToClipboard}>
+                    <FaCopy/> Copy
+                </button>
+            </div>
+        )}
       </div>
 
       {/* Content Area */}
@@ -268,10 +311,12 @@ export default function AdminDashboard() {
       </div>
 
       {/* Image Preview Modal */}
-      <Modal show={!!previewImage} onHide={() => setPreviewImage(null)} centered>
-        <Modal.Body className="p-0 bg-dark text-center">
-            <img src={previewImage} className="img-fluid" style={{maxHeight:'80vh'}} />
-            <button className="btn btn-light position-absolute top-0 end-0 m-2 rounded-circle" onClick={() => setPreviewImage(null)}><FaTimes/></button>
+      <Modal show={!!previewImage} onHide={() => setPreviewImage(null)} centered contentClassName="bg-transparent border-0">
+        <Modal.Body className="p-0 text-center position-relative">
+             <button className="btn btn-light position-absolute top-0 end-0 m-3 rounded-circle shadow" onClick={() => setPreviewImage(null)} style={{zIndex:10}}>
+                <FaTimes/>
+            </button>
+            <img src={previewImage} className="img-fluid rounded-4 shadow-lg" style={{maxHeight:'80vh'}} />
         </Modal.Body>
       </Modal>
 

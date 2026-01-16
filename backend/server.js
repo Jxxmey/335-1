@@ -3,41 +3,40 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const multer = require('multer');
-const axios = require('axios'); // ใช้สำหรับยิงไป ImgBB
+const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const webpush = require('web-push');
-const FormData = require('form-data'); // ใช้จัด format รูป
-const path = require('path'); // ✅ Import path
+const FormData = require('form-data');
+const path = require('path');
+const bcrypt = require('bcryptjs'); // ⚠️ อย่าลืม npm install bcryptjs
 
+// Import Models
 const Event = require('./models/Event');
 const Subscription = require('./models/Subscription');
+const Admin = require('./models/Admin');       // ✅ เพิ่ม
+const InviteCode = require('./models/InviteCode'); // ✅ เพิ่ม
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // --- 1. CONFIGURATIONS ---
-
-// Connect DB
 mongoose.connect(process.env.DB_CONNECTION)
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.error(err));
 
-// Config Push Notification
 webpush.setVapidDetails(
   process.env.VAPID_EMAIL,
   process.env.VAPID_PUBLIC_KEY,
   process.env.VAPID_PRIVATE_KEY
 );
 
-// Config Upload
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- Helper: Upload to ImgBB ---
 const uploadToImgBB = async (buffer) => {
     const formData = new FormData();
     formData.append('image', buffer.toString('base64'));
-    
     const response = await axios.post(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, formData, {
         headers: formData.getHeaders()
     });
@@ -49,171 +48,166 @@ const verifyToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(403).send('Token required');
   try {
-    jwt.verify(token, process.env.ADMIN_PASSWORD);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret_key');
+    req.user = decoded;
     next();
   } catch (err) {
     res.status(401).send('Invalid Token');
   }
 };
 
-const verifyTokenOptional = (req, res, next) => {
-  const token = req.headers['authorization']?.split(' ')[1];
-  if (token) {
-    try {
-      const decoded = jwt.verify(token, process.env.ADMIN_PASSWORD);
-      req.user = decoded;
-    } catch (e) {}
-  }
-  next();
-};
+// --- 3. AUTH ROUTES (ระบบใหม่) ---
 
-// --- 3. ROUTES ---
+// 3.1 Login (Database Check)
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  
+  // ค้นหา Admin
+  const admin = await Admin.findOne({ username });
+  if (!admin) return res.status(400).json({ error: 'User not found' });
 
-// Login
-app.post('/api/auth/login', (req, res) => {
-  const { password } = req.body;
-  if (password === process.env.ADMIN_PASSWORD) {
-    const token = jwt.sign({ role: 'admin' }, process.env.ADMIN_PASSWORD, { expiresIn: '1d' });
-    return res.json({ token });
-  }
-  res.status(401).json({ error: 'Wrong password' });
+  // ตรวจสอบรหัสผ่าน
+  const isMatch = await bcrypt.compare(password, admin.password);
+  if (!isMatch) return res.status(400).json({ error: 'Wrong password' });
+
+  // ออก Token
+  const token = jwt.sign({ id: admin._id, role: admin.role }, process.env.JWT_SECRET || 'secret_key', { expiresIn: '1d' });
+  res.json({ token, username: admin.username });
 });
 
-// Subscribe Notification
+// 3.2 Check Invite Code
+app.get('/api/auth/check-invite/:code', async (req, res) => {
+  const { code } = req.params;
+  const invite = await InviteCode.findOne({ code, isUsed: false, expiresAt: { $gt: new Date() } });
+  if (!invite) return res.json({ valid: false });
+  res.json({ valid: true });
+});
+
+// 3.3 Register (ต้องมี Invite Code)
+app.post('/api/auth/register', async (req, res) => {
+  const { username, password, inviteCode } = req.body;
+
+  // ตรวจสอบ Code
+  const invite = await InviteCode.findOne({ code: inviteCode, isUsed: false, expiresAt: { $gt: new Date() } });
+  if (!invite) return res.status(400).json({ error: 'Invite code invalid or expired' });
+
+  // สร้าง Admin
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const newAdmin = new Admin({ username, password: hashedPassword });
+  await newAdmin.save();
+
+  // ตัด Code ทิ้ง
+  invite.isUsed = true;
+  await invite.save();
+
+  res.json({ message: 'Registered successfully' });
+});
+
+// 3.4 Generate Invite (Admin Only)
+app.post('/api/auth/generate-invite', verifyToken, async (req, res) => {
+  const code = Math.random().toString(36).substring(2, 10); // สุ่มรหัสสั้นๆ
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + 24); // หมดอายุใน 24 ชม.
+
+  await InviteCode.create({
+    code,
+    expiresAt,
+    createdBy: req.user.id
+  });
+
+  res.json({ code, expiresAt });
+});
+
+// --- 4. EVENT & SUB ROUTES (เหมือนเดิมแต่ปรับ VerifyToken) ---
+
 app.post('/api/notifications/subscribe', async (req, res) => {
   try {
-    const sub = req.body;
-    await Subscription.findOneAndUpdate({ endpoint: sub.endpoint }, sub, { upsert: true });
+    await Subscription.findOneAndUpdate({ endpoint: req.body.endpoint }, req.body, { upsert: true });
     res.status(201).json({});
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET Events
 app.get('/api/events', async (req, res) => {
   const { role } = req.query;
-  let filter = {};
-  if (role !== 'admin') {
-    filter = {
-        $or: [
-            { status: 'approved' },
-            { status: { $exists: false } } 
-        ]
-    };
-  }
+  // ถ้าไม่ใช่ Admin ให้เห็นเฉพาะ Approved
+  const filter = role === 'admin' ? {} : { status: 'approved' };
   try {
     const events = await Event.find(filter).sort({ start: 1 });
     res.json(events);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST Event (Create - ImgBB)
-app.post('/api/events', verifyTokenOptional, upload.array('images', 10), async (req, res) => {
-  try {
-    const imageUrls = [];
-    
-    // Upload รูปไป ImgBB
-    if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(file => uploadToImgBB(file.buffer));
-      const urls = await Promise.all(uploadPromises);
-      imageUrls.push(...urls);
+app.post('/api/events', upload.array('images', 10), async (req, res) => {
+    // เช็ค Token แบบ Optional (ถ้ามี Token = Admin approved เลย, ถ้าไม่มี = User pending)
+    const token = req.headers['authorization']?.split(' ')[1];
+    let isAdmin = false;
+    if(token) {
+        try { jwt.verify(token, process.env.JWT_SECRET || 'secret_key'); isAdmin = true; } catch(e){}
     }
 
-    const status = req.user ? 'approved' : 'pending';
+    try {
+        const imageUrls = [];
+        if (req.files && req.files.length > 0) {
+            const uploadPromises = req.files.map(file => uploadToImgBB(file.buffer));
+            imageUrls.push(...await Promise.all(uploadPromises));
+        }
 
-    const newEvent = new Event({
-      title: req.body.title,
-      start: req.body.start,
-      end: req.body.end,
-      color: req.body.color,
-      description: req.body.description,
-      linkUrl: req.body.linkUrl,
-      imageUrls,
-      // imagePublicIds: ตัดออกเพราะ ImgBB ไม่ได้ใช้ ID ลบง่ายๆ
-      status: status,
-      createdBy: req.user ? 'admin' : 'user'
-    });
-
-    await newEvent.save();
-
-    if (status === 'approved') {
-        const payload = JSON.stringify({
-          title: `🔥 ใหม่! ${req.body.title}`,
-          body: req.body.description || 'คลิกเพื่อดูรายละเอียด',
-          icon: imageUrls[0] || '',
-          url: '/'
+        const newEvent = new Event({
+            title: req.body.title,
+            start: req.body.start,
+            end: req.body.end,
+            color: req.body.color,
+            description: req.body.description,
+            linkUrl: req.body.linkUrl,
+            imageUrls,
+            status: isAdmin ? 'approved' : 'pending',
+            createdBy: isAdmin ? 'admin' : 'user'
         });
-        const subs = await Subscription.find();
-        subs.forEach(sub => {
-          webpush.sendNotification(sub, payload).catch(err => {
-            if(err.statusCode === 410) Subscription.deleteOne({_id: sub._id}).exec();
-          });
-        });
-    }
 
-    res.status(201).json(newEvent);
+        await newEvent.save();
 
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Process failed: ' + err.message });
-  }
+        // Send Push
+        if (isAdmin) {
+             const payload = JSON.stringify({
+                title: `🔥 ใหม่! ${req.body.title}`,
+                body: req.body.description || 'คลิกเพื่อดูรายละเอียด',
+                icon: imageUrls[0] || ''
+             });
+             const subs = await Subscription.find();
+             subs.forEach(sub => webpush.sendNotification(sub, payload).catch(e => console.log(e)));
+        }
+
+        res.status(201).json(newEvent);
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// PUT Event (Update - ImgBB)
 app.put('/api/events/:id', verifyToken, upload.array('images', 10), async (req, res) => {
   try {
-    const { title, start, end, color, description, linkUrl } = req.body;
-    let updateData = { title, start, end, color, description, linkUrl };
-
-    // ถ้ามีการอัปโหลดรูปเพิ่ม
-    if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(file => uploadToImgBB(file.buffer));
-      const newUrls = await Promise.all(uploadPromises);
-      
+    let updateData = { ...req.body };
+    if (req.files?.length > 0) {
+      const newUrls = await Promise.all(req.files.map(f => uploadToImgBB(f.buffer)));
       updateData.$push = { imageUrls: { $each: newUrls } };
     }
-
-    const updatedEvent = await Event.findByIdAndUpdate(req.params.id, updateData, { new: true });
-    res.json(updatedEvent);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const updated = await Event.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    res.json(updated);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Approve Event
 app.put('/api/events/:id/approve', verifyToken, async (req, res) => {
-  try {
-    const event = await Event.findByIdAndUpdate(req.params.id, { status: 'approved' }, { new: true });
-    res.json(event);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    await Event.findByIdAndUpdate(req.params.id, { status: 'approved' });
+    res.json({ success: true });
 });
 
-// DELETE Event (ลบแค่ Database เพราะ ImgBB ลบยาก)
 app.delete('/api/events/:id', verifyToken, async (req, res) => {
-  try {
-      await Event.findByIdAndDelete(req.params.id);
-      res.json({ message: 'Deleted event (Images remain on ImgBB)' });
-  } catch (err) {
-      res.status(500).json({ error: err.message });
-  }
+    await Event.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
 });
 
-// ----------------------------------------
-// ✅ ให้ Backend เสิร์ฟไฟล์ Frontend
-// ----------------------------------------
+// Serve Frontend
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
-
 app.get('*', (req, res) => {
-  if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
-  }
+  if (!req.path.startsWith('/api')) res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
 });
-// ----------------------------------------
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
