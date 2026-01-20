@@ -232,5 +232,28 @@ app.get('*', (req, res) => {
   if (!req.path.startsWith('/api')) res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
 });
 
+const keepAlive = () => {
+    const url = process.env.RENDER_EXTERNAL_URL 
+                ? `${process.env.RENDER_EXTERNAL_URL}/api/events` 
+                : 'https://promo-calendar.onrender.com/api/events';
+  
+    console.log(`Setting up keep-alive for: ${url}`);
+  
+    // Ping ตัวเองทุกๆ 14 นาที (Render ตัดที่ 15 นาที)
+    setInterval(async () => {
+      try {
+        console.log('Reloading server to keep active...');
+        // เรียก API เบาๆ (ดึงข้อมูล Events) เพื่อกระตุ้น Server
+        await axios.get(url);
+        console.log('✅ Keep-alive ping success');
+      } catch (error) {
+        console.error('❌ Keep-alive ping failed:', error.message);
+      }
+    }, 5 * 60 * 1000); // 14 นาที
+};
+
+keepAlive(); // เรียกใช้งาน
+// ----------------------------------------------------------------------
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
